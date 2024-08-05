@@ -1,24 +1,30 @@
 #include "PjPlots.h"
 #include <iostream>
+#include <cmath>
 
 int main() {
-    constexpr size_t k_num_series = 1;
-    constexpr size_t k_series_length = 2;
+    constexpr size_t k_num_series = 5;
+    constexpr size_t k_series_length = 1024;
+    constexpr size_t k_data_size = k_num_series*k_series_length;
     
     // we can fill a constexpr array using an immediately returning lambda
-    static constexpr std::array<double, 5> arr = []()->std::array<double, 5>{
-        std::array<double, 5> arr;
+    static constexpr std::array<double, k_data_size> arr = []()->std::array<double, k_data_size>{
+        std::array<double, k_data_size> arr;
         size_t count = 0;
+        auto it = arr.begin();
         for (auto & val : arr) {
-            val = static_cast<double>(count++);
+            const auto sample_idx = count % k_series_length;
+            const auto series_idx = count / k_series_length;
+            val = static_cast<double>(series_idx + 1 + static_cast<double>(sample_idx/static_cast<double>(k_series_length)));
+            ++count;
         }
         return arr;
     }();
 
-    std::cout << "Array values are: \n";
-    for (const auto & val : arr) {
-        std::cout << val << '\n';
-    }
+    // std::cout << "Array values are: \n";
+    // for (const auto & val : arr) {
+    //     std::cout << val << '\n';
+    // }
     
     PjPlot::Factory builder;
     builder.get_appearance_options().set_background_colour(PjPlot::Colour::BLACK);
