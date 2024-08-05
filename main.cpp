@@ -36,6 +36,13 @@ int main() {
     std::cout << "Background colour is: " << PjPlot::to_string(builder.get_appearance_options().get_background_colour()) << "\n";
     std::cout << "Text colour is: " << PjPlot::to_string(builder.get_appearance_options().get_text_colour()) << "\n";
 
+    try {
+        std::cout << "Test exception handling: " << PjPlot::to_string(static_cast<PjPlot::Colour>(3));
+    } catch (std::runtime_error& e) {
+        std::cout << e.what() << '\n';
+    }
     // allows compile time checking!
     static_assert(img.type_s() == img2.type_s());
+
+    std::cout << "Program completed successfully\n";
 }

@@ -92,7 +92,7 @@ namespace PjPlot {
         WHITE, BLACK, COUNT
     };
 
-    // won't compile unless all invoked types are handled
+    // won't compile unless all invoked values are handled
     template <Colour Val, size_t I = 0>
     [[nodiscard]] constexpr static auto to_string() -> std::string_view {
         static_assert(I < static_cast<size_t>(Colour::COUNT));
