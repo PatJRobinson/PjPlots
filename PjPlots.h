@@ -9,10 +9,11 @@
 namespace DataType {
     using AllowedTypes = std::variant<int, uint8_t, uint32_t, float, double>; 
 
+    // helper function to check if variant contains template parameter
     template <typename T, typename V, size_t I = 0>
-    constexpr static auto check_allowed() -> bool {
+    constexpr static auto check_contains() -> bool {
         if constexpr (I < std::variant_size_v<V>) {
-            constexpr bool ret = check_allowed<T, V, I+1>();
+            constexpr bool ret = check_contains<T, V, I+1>();
             return std::is_same_v<std::variant_alternative_t<I, V>, T> || ret;
         }
         return false;
@@ -21,23 +22,17 @@ namespace DataType {
     // won't compile unless all invoked types are handled
     template <typename T, size_t I = 0>
     [[nodiscard]] constexpr static auto to_string() -> std::string_view {
-        static_assert(check_allowed<T, AllowedTypes>());
-        using ArgType = std::variant_alternative_t<I, AllowedTypes>;
-        static_assert(I < std::variant_size_v<AllowedTypes>); // unhandled type
-        if constexpr(std::is_same_v<ArgType, T>) {
-            if constexpr (std::is_same_v<ArgType, int>) {
-                return "int";
-            } else if constexpr (std::is_same_v<ArgType, uint8_t>) {
-                return "uint8_t";
-            } else if constexpr (std::is_same_v<ArgType, uint32_t>) {
-                return "uint32_t";
-            } else if constexpr (std::is_same_v<ArgType, float>) {
-                return "float";
-            } else if constexpr (std::is_same_v<ArgType, double>) {
-                return "double";
-            } else {
-                return to_string<T, I+1>();   
-            }
+        static_assert(check_contains<T, AllowedTypes>());
+        if constexpr (std::is_same_v<T, int>) {
+            return "int";
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            return "uint8_t";
+        } else if constexpr (std::is_same_v<T, uint32_t>) {
+            return "uint32_t";
+        } else if constexpr (std::is_same_v<T, float>) {
+            return "float";
+        } else if constexpr (std::is_same_v<T, double>) {
+            return "double";
         } else {
             return to_string<T, I+1>();   
         }
@@ -105,6 +100,7 @@ namespace PjPlot {
         }
     };
 
+    // runtime version 
     [[nodiscard]] static auto to_string(Colour val) -> std::string_view {
         switch (val) {
             case Colour::WHITE:
@@ -112,6 +108,7 @@ namespace PjPlot {
             case Colour::BLACK:
                 return to_string<Colour::BLACK>();
             default:
+                // important for catching UB
                 throw std::runtime_error("Error: unsupported colour type");
         }
     }
