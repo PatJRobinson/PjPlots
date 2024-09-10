@@ -8,7 +8,7 @@ int main() {
     constexpr size_t k_data_size = k_num_series*k_series_length;
     
     // we can fill a constexpr array using an immediately returning lambda
-    static consteval std::array<double, k_data_size> arr = []()->std::array<double, k_data_size>{
+    static constexpr std::array<double, k_data_size> arr = []()->std::array<double, k_data_size>{
         std::array<double, k_data_size> arr;
         size_t count = 0;
         auto it = arr.begin();
