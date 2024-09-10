@@ -17,7 +17,7 @@ static consteval auto get_test_data()->std::array<double, k_data_size>{
         ++count;
     }
     return arr;
-}();
+}
 
 int main() {
     
