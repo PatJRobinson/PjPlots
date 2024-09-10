@@ -175,7 +175,7 @@ namespace PjPlot {
 
         }
         template <class PlotType, typename UnderlyingType>
-        [[nodiscard]] constexpr auto get_plot(std::span<const UnderlyingType> data, plot_params_t<PlotType>::type params) const -> Img2 {
+        [[nodiscard]] constexpr auto get_plot(std::span<const UnderlyingType> data, typename plot_params_t<PlotType>::type params) const -> Img2 {
             return PlotType::get_plot(data, params, m_appearance_options);
         }
         
