@@ -75,6 +75,40 @@ concept UnderlyingType = DataType::AllowedType<T>;
 
 namespace PjPlot {
 
+    template <size_t Rows, size_t Cols>
+    struct StaticSize2 {
+        using is_static_size = std::true_type;
+        using is_size_type = std::true_type;
+        static constexpr size_t rows() {return Rows;}
+        static constexpr size_t cols() {return Cols;}
+        static constexpr size_t dims = 2;
+    };
+
+    struct DynamicSize2 {
+        static constexpr bool is_dynamic = true;
+        using is_static_size = std::false_type;
+        using is_size_type = std::true_type;
+
+        constexpr DynamicSize2(size_t rows, size_t cols) : m_rows(rows), m_cols(cols) {}
+
+        size_t rows() {return m_rows;}
+        size_t cols() {return m_cols;}
+        size_t m_rows = 0;
+        size_t m_cols = 0;
+        static constexpr size_t dims = 2;
+    };
+    
+    // Define a concept that checks if a type is a size type
+    template <typename T>
+    concept Size2 = requires {
+        typename T::is_size_type;  // Ensures the type has the is_size_type trait
+        { std::declval<T>().cols() } -> std::same_as<size_t>;
+        { std::declval<T>().rows() } -> std::same_as<size_t>;
+        T::dims == 2;
+    };
+
+    using DynamcSize = StaticSize2<0, 0>;
+
     class FailureType {
     public:
         constexpr FailureType(){}
@@ -104,37 +138,100 @@ namespace PjPlot {
         std::variant<T, FailureType> m_value;
     };
 
-    template <UnderlyingType T>
-    class Mat2{
-    public:
-        constexpr Mat2(){}
-        constexpr Mat2(size_t cols, size_t rows) : m_cols(cols), m_rows(rows), m_data(cols*rows) {
+    template <typename>
+    struct always_false : std::false_type {};
 
+    template <Size2 Size>
+    constexpr auto get_static_nele() -> size_t {
+        if constexpr (Size::is_static_size::value) {
+            return Size::rows()*Size::cols();
+        } else {
+            return 0;
         }
+    }
 
-        [[nodiscard]] constexpr auto to_string() const noexcept -> std::string_view{
+    // Type trait to select either std::array or std::vector based on static size
+    template <typename T, Size2 Size>
+    using StorageType = std::conditional_t<
+        (Size::is_static_size::value),
+        std::array<T, get_static_nele<Size>()>, // Static size
+        std::vector<T>              // Dynamic size
+    >;
+
+    template <typename T, Size2 Size>
+    class Mat2Impl {
+        // Helper trait to check if Rows and Cols are greater than zero
+        using is_static_size = Size::is_static_size;
+
+    public:
+        using is_matrix_type = std::true_type;
+
+        // SFINAE constructor for when a static size type is provided
+        constexpr Mat2Impl(Size size) noexcept 
+        requires is_static_size::value : m_size(size), m_data() {}
+
+        // SFINAE constructor for when a dynamic size type is provided
+        constexpr Mat2Impl(Size size) noexcept 
+        requires (!is_static_size::value) : m_size(size), m_data(std::vector<T>(size.cols() * size.rows())) {}
+
+        [[nodiscard]] constexpr auto to_string() const noexcept -> std::string_view {
             return "2d matrix";
         }
 
+        // Getter for the number of columns
         [[nodiscard]] constexpr auto cols() const noexcept -> size_t {
-            return m_cols;
+            return m_size.cols();
         }
 
+        // Getter for the number of rows
         [[nodiscard]] constexpr auto rows() const noexcept -> size_t {
-            return m_rows;
+            return m_size.rows();
         }
 
+        // Getter for the type as a string (using DataType::to_string)
         [[nodiscard]] constexpr auto type_s() const noexcept -> std::string_view {
             return DataType::to_string<T>();
         }
 
+        // Const getter for matrix data as std::span
+        [[nodiscard]] auto data() const noexcept -> std::span<const T> {
+            return std::span<const T>(m_data.data(), m_data.size());
+        }
+
+        // Non-const getter for matrix data as std::span
+        [[nodiscard]] auto data() noexcept -> std::span<T> {
+            return std::span<T>(m_data.data(), m_data.size());
+        }
+
+        // Element-wise access operator (non-const)
+        [[nodiscard]] auto operator()(size_t col, size_t row) noexcept -> T& {
+            size_t idx = row * m_size.cols() + col;
+            return data()[idx];
+        }
+
+        // Element-wise access operator (const)
+        [[nodiscard]] auto operator()(size_t col, size_t row) const noexcept -> const T& {
+            size_t idx = row * m_size.cols() + col;
+            return data()[idx];
+        }
+
     private:
-        size_t m_cols;
-        size_t m_rows;
-        std::vector<T> m_data;
+        Size m_size;
+        StorageType<T, Size> m_data;
     };
 
-    using Img2 = Mat2<uint8_t>;
+    // Define a concept that checks if a type is a matrix type
+    template <typename T>
+    concept Mat2 = requires {
+        typename T::is_matrix_type;  // Ensures the type has the is_matrix_type trait
+        { std::declval<T>().rows() } -> std::same_as<size_t>;
+        { std::declval<T>().cols() } -> std::same_as<size_t>;
+        { std::declval<T>().data() } -> std::same_as<std::span<const typename T::value_type>>;
+    };
+
+    // Alias for an image type (e.g., uint8_t matrix)
+    template <Size2 Size>
+    using Img2 = Mat2Impl<uint8_t, Size>;
 
     enum class Colour {
         WHITE, BLACK, COUNT
@@ -169,7 +266,7 @@ namespace PjPlot {
     class AppearanceOptions {
     public:
         constexpr AppearanceOptions(){}
-        
+
         [[nodiscard]] constexpr static auto create(Colour background, Colour text) noexcept-> ResultWithValue<AppearanceOptions> {
             if (background < Colour::COUNT && text < Colour::COUNT) {
                 return ResultWithValue<AppearanceOptions>(AppearanceOptions(background, text));
@@ -204,6 +301,7 @@ namespace PjPlot {
         Colour m_text_colour = Colour::BLACK;
     };
 
+
     class Chart{
     public: 
         class Params {
@@ -217,10 +315,16 @@ namespace PjPlot {
             size_t m_num_series;
         };
 
-        template <typename UnderlyingType>
-        [[nodiscard]] constexpr static auto get_plot(std::span<UnderlyingType> data, Params params, const AppearanceOptions&) -> Img2 {
-            return Img2{};
+        template <typename UnderlyingType, Size2 OutSize>
+        [[nodiscard]] constexpr static auto get_plot(std::span<const UnderlyingType> data, Params params, const AppearanceOptions&, OutSize out_size) -> Img2<OutSize> {
+            return Img2<OutSize>(out_size);
         }
+
+        template <typename UnderlyingType, Size2 OutSize>
+        constexpr static auto get_plot(std::span<const UnderlyingType> data, Params params, const AppearanceOptions&, Img2<OutSize>&) -> void {
+            return;
+        }
+
         struct TypeMapper {
             using type = Params;
         };
@@ -237,11 +341,16 @@ namespace PjPlot {
         constexpr Factory() {
 
         }
-        template <class PlotType, typename UnderlyingType>
-        [[nodiscard]] constexpr auto get_plot(std::span<const UnderlyingType> data, typename plot_params_t<PlotType>::type params) const -> Img2 {
-            return PlotType::get_plot(data, params, m_appearance_options);
+        template <class PlotType, typename UnderlyingType, Size2 OutSize = DynamcSize>
+        [[nodiscard]] constexpr auto get_plot(std::span<const UnderlyingType> data, typename plot_params_t<PlotType>::type params, OutSize output_size) const -> Img2<OutSize> {
+            return PlotType::template get_plot<UnderlyingType, OutSize>(data, params, m_appearance_options, output_size);
         }
         
+        template <class PlotType, typename UnderlyingType, Size2 OutSize = DynamcSize>
+        constexpr auto get_plot(std::span<const UnderlyingType> data, typename plot_params_t<PlotType>::type params, Img2<OutSize>&, OutSize output_size) const -> void {
+            return;
+        }
+
         [[nodiscard]] constexpr auto get_appearance_options() noexcept -> AppearanceOptions& {
             return m_appearance_options;
         }

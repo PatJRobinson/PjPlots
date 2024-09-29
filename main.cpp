@@ -29,12 +29,25 @@ int main() {
     //     std::cout << val << '\n';
     // }
 
+    PjPlot::Mat2Impl<double, PjPlot::DynamicSize2> mat(PjPlot::DynamicSize2(600, 600));
+
+    static_assert(std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::StaticSize2<600, 600>>, std::array<uint8_t, 360000>>);
+    static_assert(std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::DynamicSize2>, std::vector<uint8_t>>);
+
+    if constexpr (std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::StaticSize2<600, 600>>, std::array<uint8_t, 360000>>) {
+        std::cout << "Static sized array is working\n";
+    } else {
+        std::cout << "Static sized array is not working\n";
+    }
+
     constexpr auto test_appearance = PjPlot::AppearanceOptions::create(PjPlot::Colour::BLACK, PjPlot::Colour::WHITE);
     
     PjPlot::Factory builder;
     builder.get_appearance_options().set_background_colour(PjPlot::Colour::BLACK);
     builder.get_appearance_options().set_text_colour(PjPlot::Colour::WHITE);
-    const auto img = builder.get_plot<PjPlot::Chart, double>(arr, PjPlot::Chart::Params(k_num_series, k_series_length));
+    const auto img = builder.get_plot<PjPlot::Chart, double>(arr, PjPlot::Chart::Params(k_num_series, k_series_length), PjPlot::StaticSize2<600, 600>{});
+    const auto img_dynamic = builder.get_plot<PjPlot::Chart, double>(arr, PjPlot::Chart::Params(k_num_series, k_series_length), PjPlot::DynamicSize2(600, 600));
+    // const auto img = builder.get_plot<PjPlot::Chart, double>(arr, PjPlot::Chart::Params(k_num_series, k_series_length));
     std::cout << "I am a " << img.to_string() << ", my underlying type is: " << img.type_s() << '\n';
     const auto img2 = img;
 
@@ -43,7 +56,7 @@ int main() {
 
     try {
         std::cout << "Test exception handling: " << PjPlot::to_string(static_cast<PjPlot::Colour>(3));
-    } catch (std::runtime_error& e) {
+    } catch (std::invalid_argument& e) {
         std::cout << e.what() << '\n';
     }
     // allows compile time checking!
