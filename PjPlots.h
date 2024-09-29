@@ -5,12 +5,31 @@
 #include <variant>
 #include <exception>
 #include <stdexcept>
+#include <stdint.h>
 
 namespace DataType {
-    using AllowedTypes = std::variant<int, uint8_t, uint32_t, float, double>; 
+    
+    using v_AllowedTypes = std::variant<int, uint8_t, uint32_t, float, double>;
 
+    // Concept to constrain T to one of the allowed types in v_AllowedTypes
+    // Helper trait to check if a type is in a variant
+    template <typename T, typename Variant>
+    struct is_in_variant;
+
+    // Specialization to recursively check each type in the variant
+    template <typename T, typename... Types>
+    struct is_in_variant<T, std::variant<Types...>> 
+        : std::disjunction<std::is_same<T, Types>...> {};
+
+    // Convenience variable template
+    template <typename T, typename Variant>
+    inline constexpr bool is_in_variant_v = is_in_variant<T, Variant>::value;
+
+    template <typename T>
+    concept AllowedType = is_in_variant_v<T, v_AllowedTypes>;
+    
     // helper function to check if variant contains template parameter
-    template <typename T, typename V, size_t I = 0>
+    template <AllowedType T, typename V, size_t I = 0>
     constexpr static auto check_contains() -> bool {
         if constexpr (I < std::variant_size_v<V>) {
             constexpr bool ret = check_contains<T, V, I+1>();
@@ -20,9 +39,9 @@ namespace DataType {
     }
 
     // won't compile unless all invoked types are handled
-    template <typename T, size_t I = 0>
+    template <AllowedType T, size_t I = 0>
     [[nodiscard]] constexpr static auto to_string() -> std::string_view {
-        static_assert(check_contains<T, AllowedTypes>());
+        static_assert(check_contains<T, v_AllowedTypes>());
         if constexpr (std::is_same_v<T, int>) {
             return "int";
         } else if constexpr (std::is_same_v<T, uint8_t>) {
@@ -41,8 +60,8 @@ namespace DataType {
     // little compile-time test to ensure all variant types are handled
     template <size_t I = 0>
     constexpr static auto test_to_string() -> bool{
-        if constexpr (I < std::variant_size_v<AllowedTypes>) {
-            constexpr auto s = to_string<std::variant_alternative_t<I, AllowedTypes>>();
+        if constexpr (I < std::variant_size_v<v_AllowedTypes>) {
+            constexpr auto s = to_string<std::variant_alternative_t<I, v_AllowedTypes>>();
             return test_to_string<I+1>();
         }
         return true;
@@ -50,8 +69,42 @@ namespace DataType {
     constexpr static bool is_working = test_to_string();
 }
 
+// convenience alias for use outside 'DataType'
+template <typename T>
+concept UnderlyingType = DataType::AllowedType<T>;
+
 namespace PjPlot {
+
+    class FailureType {
+    public:
+        constexpr FailureType(){}
+        constexpr FailureType(std::string_view message) : m_message(message) {}
+
+        [[nodiscard]] constexpr auto get_message() const noexcept -> std::string_view {
+            return m_message;
+        }
+    private:
+        std::string m_message;
+    };
+
     template <typename T>
+    class ResultWithValue {
+    public:
+        constexpr ResultWithValue(T value) : m_value(value) {}
+        constexpr ResultWithValue(FailureType&& value) : m_value(std::move(value)) {}
+        [[nodiscard]] constexpr static auto Failure(std::string&& msg) noexcept -> ResultWithValue<T>{
+            return ResultWithValue<T>(FailureType(std::move(msg)));
+        }
+
+        [[nodiscard]] constexpr auto get_value() const noexcept -> T {
+            return m_value;
+        }
+
+    private:
+        std::variant<T, FailureType> m_value;
+    };
+
+    template <UnderlyingType T>
     class Mat2{
     public:
         constexpr Mat2(){}
@@ -89,7 +142,7 @@ namespace PjPlot {
 
     // won't compile unless all invoked values are handled
     template <Colour Val, size_t I = 0>
-    [[nodiscard]] constexpr static auto to_string() -> std::string_view {
+    [[nodiscard]] constexpr static auto to_string() noexcept -> std::string_view {
         static_assert(I < static_cast<size_t>(Colour::COUNT));
         if constexpr (Val == Colour::WHITE) {
             return "white";
@@ -109,16 +162,20 @@ namespace PjPlot {
                 return to_string<Colour::BLACK>();
             default:
                 // important for catching UB
-                throw std::runtime_error("Error: unsupported colour type");
+                throw std::invalid_argument("Error: unsupported colour type");
         }
     }
 
     class AppearanceOptions {
     public:
         constexpr AppearanceOptions(){}
-        constexpr AppearanceOptions(Colour background, Colour text) 
-        : m_background_colour(background), m_text_colour(text) {
-
+        
+        [[nodiscard]] constexpr static auto create(Colour background, Colour text) noexcept-> ResultWithValue<AppearanceOptions> {
+            if (background < Colour::COUNT && text < Colour::COUNT) {
+                return ResultWithValue<AppearanceOptions>(AppearanceOptions(background, text));
+            } else {
+                return ResultWithValue<AppearanceOptions>::Failure("Error: invalid colour type");
+            }
         }
         constexpr void set_background_colour(Colour background) {
             m_background_colour = background;
@@ -137,6 +194,12 @@ namespace PjPlot {
         }
 
     private:
+
+        constexpr AppearanceOptions(Colour background, Colour text) 
+        : m_background_colour(background), m_text_colour(text) {
+
+        }
+
         Colour m_background_colour = Colour::WHITE;
         Colour m_text_colour = Colour::BLACK;
     };

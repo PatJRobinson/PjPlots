@@ -28,6 +28,8 @@ int main() {
     // for (const auto & val : arr) {
     //     std::cout << val << '\n';
     // }
+
+    constexpr auto test_appearance = PjPlot::AppearanceOptions::create(PjPlot::Colour::BLACK, PjPlot::Colour::WHITE);
     
     PjPlot::Factory builder;
     builder.get_appearance_options().set_background_colour(PjPlot::Colour::BLACK);
