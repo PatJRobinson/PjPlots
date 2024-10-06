@@ -110,13 +110,6 @@ namespace PjPlot {
         static constexpr size_t dims = 2;
     };
 
-    template <typename T>
-    concept Size1 = requires {
-        typename T::is_size_type;  // Ensures the type has the is_size_type trait
-        { std::declval<T>().length() } -> std::same_as<size_t>;
-        T::dims == 1;
-    };
-
     struct DynamicSize1 {
         static constexpr bool is_dynamic = true;
         using is_static_size = std::false_type;
@@ -145,6 +138,14 @@ namespace PjPlot {
         static constexpr size_t dims = 2;
     };
     
+
+    template <typename T>
+    concept Size1 = requires {
+        typename T::is_size_type;  // Ensures the type has the is_size_type trait
+        { std::declval<T>().length() } -> std::same_as<size_t>;
+        T::dims == 1;
+    };
+
     [[nodiscard]] inline constexpr auto calculate_linear_idx(Size1 auto dims, size_t idx) -> size_t {
         if constexpr (idx >= dims.length()) {
             throw std::out_of_range("Index out of range");
@@ -173,7 +174,7 @@ namespace PjPlot {
     }
 
     // helper function to unpack an array of indices and call the correct overload of calculate_linear_idx
-    // currently used to generically constrain SizeN
+    // currently only used to generically constrain SizeN
     template <size_t N, typename T, size_t... Is>
     constexpr size_t unpack_and_calculate(const std::array<T, N>& indices, std::index_sequence<Is...>) {
         return calculate_linear_idx(indices[Is]...);  // Unpack the array elements
@@ -186,75 +187,76 @@ namespace PjPlot {
         { std::declval<T>().nele() } -> std::convertible_to<size_t>;
         { unpack_and_calculate(std::array<size_t, T::dims>{}, std::make_index_sequence<T::dims>{}) } -> std::convertible_to<size_t>;
     };
-/**
- * @brief Represents a failure message in the application.
- *
- * The `FailureType` class encapsulates a failure message, which can be used to provide context about errors
- * that occur during operations. This class is typically used in conjunction with `ResultWithValue`.
- */
-class FailureType {
-public:
-    /**
-     * @brief Default constructor for `FailureType`.
-     */
-    constexpr FailureType() {}
 
     /**
-     * @brief Constructs a `FailureType` with a movable string message.
-     * 
-     * @param message The failure message, which will be moved into the class.
+     * @brief Represents a failure message in the application.
+     *
+     * The `FailureType` class encapsulates a failure message, which can be used to provide context about errors
+     * that occur during operations. This class is typically used in conjunction with `ResultWithValue`.
      */
-    constexpr explicit FailureType(std::string&& message) : m_message(std::move(message)) {}
+    class FailureType {
+    public:
+        /**
+         * @brief Default constructor for `FailureType`.
+         */
+        constexpr FailureType() {}
+
+        /**
+         * @brief Constructs a `FailureType` with a movable string message.
+         * 
+         * @param message The failure message, which will be moved into the class.
+         */
+        constexpr explicit FailureType(std::string&& message) : m_message(std::move(message)) {}
+
+        /**
+         * @brief Constructs a `FailureType` with a string view message.
+         * 
+         * @param message The failure message as a `std::string_view`, which will be copied into the class.
+         */
+        constexpr FailureType(std::string_view message) : m_message(message) {}
+
+        /**
+         * @brief Retrieves the failure message.
+         * 
+         * @return const std::string& The stored failure message.
+         */
+        [[nodiscard]] constexpr auto get_message() noexcept -> const std::string& {
+            return m_message;
+        }
+
+    private:
+        std::string m_message; ///< The failure message stored in the class.
+    };
 
     /**
-     * @brief Constructs a `FailureType` with a string view message.
-     * 
-     * @param message The failure message as a `std::string_view`, which will be copied into the class.
+     * @brief Exception class for handling unhandled failures in `ResultWithValue`.
+     *
+     * The `UnhandledFailureException` class provides a way to signal that a failure occurred
+     * when attempting to retrieve a value from a `ResultWithValue` instance, without the
+     * caller explicitly handling the failure case.
      */
-    constexpr FailureType(std::string_view message) : m_message(message) {}
+    class UnhandledFailureException : public std::exception {
+    public:
+        /**
+         * @brief Constructs an `UnhandledFailureException` with a specified message.
+         * 
+         * @param message The message that describes the failure.
+         */
+        explicit UnhandledFailureException(const std::string& message)
+            : m_message(message) {}
 
-    /**
-     * @brief Retrieves the failure message.
-     * 
-     * @return const std::string& The stored failure message.
-     */
-    [[nodiscard]] constexpr auto get_message() noexcept -> const std::string& {
-        return m_message;
-    }
+        /**
+         * @brief Overrides the what() function to provide the error message.
+         * 
+         * @return const char* A C-style string containing the error message.
+         */
+        const char* what() const noexcept override {
+            return m_message.c_str();
+        }
 
-private:
-    std::string m_message; ///< The failure message stored in the class.
-};
-
-/**
- * @brief Exception class for handling unhandled failures in `ResultWithValue`.
- *
- * The `UnhandledFailureException` class provides a way to signal that a failure occurred
- * when attempting to retrieve a value from a `ResultWithValue` instance, without the
- * caller explicitly handling the failure case.
- */
-class UnhandledFailureException : public std::exception {
-public:
-    /**
-     * @brief Constructs an `UnhandledFailureException` with a specified message.
-     * 
-     * @param message The message that describes the failure.
-     */
-    explicit UnhandledFailureException(const std::string& message)
-        : m_message(message) {}
-
-    /**
-     * @brief Overrides the what() function to provide the error message.
-     * 
-     * @return const char* A C-style string containing the error message.
-     */
-    const char* what() const noexcept override {
-        return m_message.c_str();
-    }
-
-private:
-    std::string m_message; ///< The failure message associated with the exception.
-};
+    private:
+        std::string m_message; ///< The failure message associated with the exception.
+    };
 
     /**
      * @brief Represents a result that can either hold a value or indicate a failure.
@@ -472,7 +474,6 @@ private:
     template <Colour Val>
         requires (Val < Colour::COUNT)
     [[nodiscard]] constexpr static auto to_string() -> std::string_view {
-        static_assert(Val < Colour::COUNT);
         if constexpr (Val == Colour::WHITE) {
             return "white";
         } else if constexpr (Val == Colour::BLACK) {
@@ -657,10 +658,7 @@ private:
     };
 
     template <ChartType Type>
-    concept ValidChartType = (Type < ChartType::COUNT);
-
-    template <ChartType Type>
-        requires ValidChartType<Type>
+        requires (Type < ChartType::COUNT) // valid chart type
     class Chart{
     public: 
         class Params {
