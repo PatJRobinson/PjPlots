@@ -8,12 +8,14 @@
 #include <stdint.h>
 
 
-template <typename>
-struct always_false : std::false_type {};
 
-namespace DataType {
+namespace PjPlot {
+
+
+    template <typename>
+    struct always_false : std::false_type {};
+
     template <typename T>
-
     struct Vec2 {
         T x;
         T y;
@@ -26,7 +28,20 @@ namespace DataType {
         T z;
     };
 
-    using v_AllowedTypes = std::variant<int, uint8_t, uint32_t, float, double>;
+    class RGBA {
+    public:
+        constexpr RGBA() = default;
+        constexpr RGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) 
+        : m_r(r), m_g(g), m_b(b), m_a(a) {
+        }
+    private:
+        uint8_t m_r;
+        uint8_t m_g;
+        uint8_t m_b;
+        uint8_t m_a;
+    };
+
+    using v_AllowedTypes = std::variant<int, uint8_t, uint32_t, float, double, RGBA>;
 
     // Concept to constrain T to one of the allowed types in v_AllowedTypes
     // Helper trait to check if a type is in a variant
@@ -68,11 +83,14 @@ namespace DataType {
             return "float";
         } else if constexpr (std::is_same_v<T, double>) {
             return "double";
+        } else if constexpr (std::is_same_v<T, RGBA>) {
+            return "RGBA";
         } else {
             static_assert(always_false<T>::value, "Error: unhandled type");
         }
     }
 
+#ifdef PJPLOT_ENABLE_TESTS
     // little compile-time test to ensure all variant types are handled
     template <size_t I = 0>
     consteval static auto test_to_string() -> bool{
@@ -83,13 +101,11 @@ namespace DataType {
         return true;
     }
     constexpr static bool to_string_test = test_to_string();
-}
+#endif
+    // convenience alias for use outside 'DataType'
+    template <typename T>
+    concept UnderlyingType = AllowedType<T>;
 
-// convenience alias for use outside 'DataType'
-template <typename T>
-concept UnderlyingType = DataType::AllowedType<T>;
-
-namespace PjPlot {
 
     template <size_t Length>
     struct StaticSize1 {
@@ -382,9 +398,9 @@ namespace PjPlot {
             return m_size.nele();
         }
 
-        // Getter for the type as a string (using DataType::to_string)
+        // Getter for the type as a string (using to_string)
         [[nodiscard]] constexpr auto type_s() const noexcept -> std::string_view {
-            return DataType::to_string<T>();
+            return PjPlot::to_string<T>();
         }
 
         // Const getter for array data as std::span
@@ -458,10 +474,9 @@ namespace PjPlot {
         }
     };
 
-
-    // Alias for an image type (e.g., uint8_t matrix)
+    // Alias for an image type (e.g., RGBA matrix)
     template <Size2 Size>
-    using Img2 = Mat2<uint8_t, Size>;
+    using Img2 = Mat2<RGBA, Size>;
 
     template <Size2 Size>
     using Img2F = Mat2<float, Size>;
@@ -483,16 +498,18 @@ namespace PjPlot {
         }
     }
 
+#ifdef PJPLOT_ENABLE_TESTS
     // little compile-time test to ensure all colour types are handled
     template <size_t I = 0>
-    consteval static auto test_to_string() -> bool{
+    consteval static auto test_colour_to_string() -> bool{
         if constexpr (I < static_cast<size_t>(Colour::COUNT)) {
             constexpr auto s = to_string<static_cast<Colour>(I)>();
-            return test_to_string<I+1>();
+            return test_colour_to_string<I+1>();
         }
         return true;
     }
-    constexpr static bool to_string_test = test_to_string();
+    constexpr static bool to_colour_to_string_test = test_colour_to_string();
+#endif
 
     // runtime version 
     [[nodiscard]] static auto to_string(Colour val) -> std::string_view {
@@ -507,18 +524,6 @@ namespace PjPlot {
         }
     }
 
-    class RGBA {
-    public:
-        constexpr RGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) 
-        : m_r(r), m_g(g), m_b(b), m_a(a) {
-        }
-    private:
-        uint8_t m_r;
-        uint8_t m_g;
-        uint8_t m_b;
-        uint8_t m_a;
-    };
-
     // a class to store the image elements for the grid, including lines, labels and ticks
     // each element has a pair of x and y coordinates (representing the top-left corner), and a Mat2 of RGBA values
     // the purpose is to quickly draw the grid on the image without having to iterate over the entire image
@@ -531,7 +536,7 @@ namespace PjPlot {
         template <typename T>
         struct GridElement {
             T m_element;
-            DataType::Vec2<size_t> m_offset;
+            Vec2<size_t> m_offset;
         };
         static constexpr size_t k_max_num_labels = 2;
         static constexpr size_t k_max_num_ticks = 20;
