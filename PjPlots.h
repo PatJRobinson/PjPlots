@@ -7,8 +7,25 @@
 #include <stdexcept>
 #include <stdint.h>
 
+
+template <typename>
+struct always_false : std::false_type {};
+
 namespace DataType {
-    
+    template <typename T>
+
+    struct Vec2 {
+        T x;
+        T y;
+    };
+
+    template <typename T>
+    struct Vec3 {
+        T x;
+        T y;
+        T z;
+    };
+
     using v_AllowedTypes = std::variant<int, uint8_t, uint32_t, float, double>;
 
     // Concept to constrain T to one of the allowed types in v_AllowedTypes
@@ -38,8 +55,7 @@ namespace DataType {
         return false;
     }
 
-    // won't compile unless all invoked types are handled
-    template <AllowedType T, size_t I = 0>
+    template <AllowedType T>
     [[nodiscard]] constexpr static auto to_string() -> std::string_view {
         static_assert(check_contains<T, v_AllowedTypes>());
         if constexpr (std::is_same_v<T, int>) {
@@ -53,20 +69,20 @@ namespace DataType {
         } else if constexpr (std::is_same_v<T, double>) {
             return "double";
         } else {
-            return to_string<T, I+1>();   
+            static_assert(always_false<T>::value, "Error: unhandled type");
         }
     }
 
     // little compile-time test to ensure all variant types are handled
     template <size_t I = 0>
-    constexpr static auto test_to_string() -> bool{
+    consteval static auto test_to_string() -> bool{
         if constexpr (I < std::variant_size_v<v_AllowedTypes>) {
             constexpr auto s = to_string<std::variant_alternative_t<I, v_AllowedTypes>>();
             return test_to_string<I+1>();
         }
         return true;
     }
-    constexpr static bool is_working = test_to_string();
+    constexpr static bool to_string_test = test_to_string();
 }
 
 // convenience alias for use outside 'DataType'
@@ -75,13 +91,43 @@ concept UnderlyingType = DataType::AllowedType<T>;
 
 namespace PjPlot {
 
+    template <size_t Length>
+    struct StaticSize1 {
+        using is_static_size = std::true_type;
+        using is_size_type = std::true_type;
+        static constexpr size_t length() {return Length;}
+        static constexpr size_t nele() {return Length;}
+        static constexpr size_t dims = 1;
+    };
+
     template <size_t Rows, size_t Cols>
     struct StaticSize2 {
         using is_static_size = std::true_type;
         using is_size_type = std::true_type;
         static constexpr size_t rows() {return Rows;}
         static constexpr size_t cols() {return Cols;}
+        static constexpr size_t nele() {return Rows*Cols;}
         static constexpr size_t dims = 2;
+    };
+
+    template <typename T>
+    concept Size1 = requires {
+        typename T::is_size_type;  // Ensures the type has the is_size_type trait
+        { std::declval<T>().length() } -> std::same_as<size_t>;
+        T::dims == 1;
+    };
+
+    struct DynamicSize1 {
+        static constexpr bool is_dynamic = true;
+        using is_static_size = std::false_type;
+        using is_size_type = std::true_type;
+
+        constexpr DynamicSize1(size_t length) : m_length(length) {}
+
+        size_t length() {return m_length;}
+        size_t nele() {return m_length;}
+        size_t m_length = 0;
+        static constexpr size_t dims = 1;
     };
 
     struct DynamicSize2 {
@@ -91,23 +137,55 @@ namespace PjPlot {
 
         constexpr DynamicSize2(size_t rows, size_t cols) : m_rows(rows), m_cols(cols) {}
 
-        size_t rows() {return m_rows;}
-        size_t cols() {return m_cols;}
+        constexpr size_t rows() {return m_rows;}
+        constexpr size_t cols() {return m_cols;}
+        constexpr size_t nele() {return rows()*cols();}
         size_t m_rows = 0;
         size_t m_cols = 0;
         static constexpr size_t dims = 2;
     };
     
+    [[nodiscard]] inline constexpr auto calculate_linear_idx(Size1 auto dims, size_t idx) -> size_t {
+        if constexpr (idx >= dims.length()) {
+            throw std::out_of_range("Index out of range");
+        }
+        return idx;
+    }
+
     // Define a concept that checks if a type is a size type
     template <typename T>
     concept Size2 = requires {
         typename T::is_size_type;  // Ensures the type has the is_size_type trait
-        { std::declval<T>().cols() } -> std::same_as<size_t>;
-        { std::declval<T>().rows() } -> std::same_as<size_t>;
+        { std::declval<T>().cols() } -> std::convertible_to<size_t>;
+        { std::declval<T>().rows() } -> std::convertible_to<size_t>;
         T::dims == 2;
     };
 
-    using DynamcSize = StaticSize2<0, 0>;
+    [[nodiscard]] inline constexpr auto calculate_linear_idx(Size2 auto dims, size_t row, size_t col) -> size_t {
+        if constexpr (row >= dims.rows()) {
+            throw std::out_of_range("Row index out of range");
+        }
+        if constexpr (col >= dims.cols()) {
+            throw std::out_of_range("Column index out of range");
+        }
+        const auto row_idx = row * dims.cols();
+        return row_idx + col;
+    }
+
+    // helper function to unpack an array of indices and call the correct overload of calculate_linear_idx
+    // currently used to generically constrain SizeN
+    template <size_t N, typename T, size_t... Is>
+    constexpr size_t unpack_and_calculate(const std::array<T, N>& indices, std::index_sequence<Is...>) {
+        return calculate_linear_idx(indices[Is]...);  // Unpack the array elements
+    }
+
+    template <typename T>
+    concept SizeN = requires {
+        typename T::is_size_type;  // Ensures the type has the is_size_type trait
+        { T::dims } -> std::convertible_to<size_t>;
+        { std::declval<T>().nele() } -> std::convertible_to<size_t>;
+        { unpack_and_calculate(std::array<size_t, T::dims>{}, std::make_index_sequence<T::dims>{}) } -> std::convertible_to<size_t>;
+    };
 
     class FailureType {
     public:
@@ -124,22 +202,24 @@ namespace PjPlot {
     template <typename T>
     class ResultWithValue {
     public:
-        constexpr ResultWithValue(T value) : m_value(value) {}
+        constexpr ResultWithValue(T&& value) : m_value(std::move(value)) {}
         constexpr ResultWithValue(FailureType&& value) : m_value(std::move(value)) {}
         [[nodiscard]] constexpr static auto Failure(std::string&& msg) noexcept -> ResultWithValue<T>{
             return ResultWithValue<T>(FailureType(std::move(msg)));
         }
 
-        [[nodiscard]] constexpr auto get_value() const noexcept -> T {
-            return m_value;
+        [[nodiscard]] constexpr auto get_value() const -> T {
+            try {
+                return std::get<T>(m_value);
+            } catch (std::bad_variant_access& e) {
+                throw std::runtime_error("Error: you tried to access the value but the function failed");
+            }
         }
 
     private:
         std::variant<T, FailureType> m_value;
     };
 
-    template <typename>
-    struct always_false : std::false_type {};
 
     template <Size2 Size>
     constexpr auto get_static_nele() -> size_t {
@@ -158,34 +238,40 @@ namespace PjPlot {
         std::vector<T>              // Dynamic size
     >;
 
-    template <typename T, Size2 Size>
-    class Mat2Impl {
-        // Helper trait to check if Rows and Cols are greater than zero
+    template <typename T, SizeN Size>
+    class ArrayNd {
         using is_static_size = Size::is_static_size;
-
     public:
-        using is_matrix_type = std::true_type;
+        using is_array_type = std::true_type;
 
         // SFINAE constructor for when a static size type is provided
-        constexpr Mat2Impl(Size size) noexcept 
+        constexpr ArrayNd(Size size) noexcept 
         requires is_static_size::value : m_size(size), m_data() {}
 
         // SFINAE constructor for when a dynamic size type is provided
-        constexpr Mat2Impl(Size size) noexcept 
-        requires (!is_static_size::value) : m_size(size), m_data(std::vector<T>(size.cols() * size.rows())) {}
+        constexpr ArrayNd(Size size) noexcept 
+        requires (!is_static_size::value) : m_size(size), m_data(std::vector<T>(size.nele())) {}
 
         [[nodiscard]] constexpr auto to_string() const noexcept -> std::string_view {
-            return "2d matrix";
+
+            // Handle the case of dimensions from 1 to 9
+            switch (Size::dims) {
+                case 1: return "1-D array";
+                case 2: return "2-D array";
+                case 3: return "3-D array";
+                case 4: return "4-D array";
+                case 5: return "5-D array";
+                case 6: return "6-D array";
+                case 7: return "7-D array";
+                case 8: return "8-D array";
+                case 9: return "9-D array";
+                default: return "N-D array";  // Default case for higher dimensions
+            }
         }
 
-        // Getter for the number of columns
-        [[nodiscard]] constexpr auto cols() const noexcept -> size_t {
-            return m_size.cols();
-        }
-
-        // Getter for the number of rows
-        [[nodiscard]] constexpr auto rows() const noexcept -> size_t {
-            return m_size.rows();
+        // Getter for the number of elements
+        [[nodiscard]] constexpr auto nele() const noexcept -> size_t {
+            return m_size.nele();
         }
 
         // Getter for the type as a string (using DataType::to_string)
@@ -193,62 +279,92 @@ namespace PjPlot {
             return DataType::to_string<T>();
         }
 
-        // Const getter for matrix data as std::span
+        // Const getter for array data as std::span
         [[nodiscard]] auto data() const noexcept -> std::span<const T> {
             return std::span<const T>(m_data.data(), m_data.size());
         }
 
-        // Non-const getter for matrix data as std::span
+        // Non-const getter for array data as std::span
         [[nodiscard]] auto data() noexcept -> std::span<T> {
             return std::span<T>(m_data.data(), m_data.size());
         }
 
         // Element-wise access operator (non-const)
-        [[nodiscard]] auto operator()(size_t col, size_t row) noexcept -> T& {
-            size_t idx = row * m_size.cols() + col;
-            return data()[idx];
-        }
+        template <typename... Args>
+        [[nodiscard]] inline auto operator()(Args... args) -> T& {
+            static_assert(sizeof...(args) == m_size.dims, "Incorrect number of arguments");
+            return m_data[calculate_linear_idx(m_size, args...)];
+        }        
 
         // Element-wise access operator (const)
-        [[nodiscard]] auto operator()(size_t col, size_t row) const noexcept -> const T& {
-            size_t idx = row * m_size.cols() + col;
-            return data()[idx];
+        template <typename... Args>
+        [[nodiscard]] auto operator()(Args... args) const -> const T& {
+            static_assert(sizeof...(args) == m_size.dims, "Incorrect number of arguments");
+            return m_data[calculate_linear_idx(m_size, args...)];
         }
 
-    private:
+    protected:
         Size m_size;
         StorageType<T, Size> m_data;
     };
 
-    // Define a concept that checks if a type is a matrix type
-    template <typename T>
-    concept Mat2 = requires {
-        typename T::is_matrix_type;  // Ensures the type has the is_matrix_type trait
-        { std::declval<T>().rows() } -> std::same_as<size_t>;
-        { std::declval<T>().cols() } -> std::same_as<size_t>;
-        { std::declval<T>().data() } -> std::same_as<std::span<const typename T::value_type>>;
+    template <typename T, Size1 Size>
+    using Array1d = ArrayNd<T, Size>;
+
+    template <typename T, Size2 Size>
+    class Mat2 : public ArrayNd<T, Size> {
+    public:
+
+        constexpr Mat2(Size size) noexcept 
+        : ArrayNd<T, Size>(size) {}
+
+        // Getter for the number of columns
+        [[nodiscard]] constexpr auto cols() const noexcept -> size_t {
+            return ArrayNd<T, Size>::cols();
+        }
+
+        // Getter for the number of rows
+        [[nodiscard]] constexpr auto rows() const noexcept -> size_t {
+            return ArrayNd<T, Size>::rows();
+        }
     };
+
 
     // Alias for an image type (e.g., uint8_t matrix)
     template <Size2 Size>
-    using Img2 = Mat2Impl<uint8_t, Size>;
+    using Img2 = Mat2<uint8_t, Size>;
+
+    template <Size2 Size>
+    using Img2F = Mat2<float, Size>;
 
     enum class Colour {
         WHITE, BLACK, COUNT
     };
 
-    // won't compile unless all invoked values are handled
-    template <Colour Val, size_t I = 0>
-    [[nodiscard]] constexpr static auto to_string() noexcept -> std::string_view {
-        static_assert(I < static_cast<size_t>(Colour::COUNT));
+
+    template <Colour Val>
+        requires (Val < Colour::COUNT)
+    [[nodiscard]] constexpr static auto to_string() -> std::string_view {
+        static_assert(Val < Colour::COUNT);
         if constexpr (Val == Colour::WHITE) {
             return "white";
         } else if constexpr (Val == Colour::BLACK) {
             return "black";
         } else {
-            return to_string<Val, I+1>();
+            static_assert(always_false<void>::value, "Error: unhandled type");
         }
-    };
+    }
+
+    // little compile-time test to ensure all colour types are handled
+    template <size_t I = 0>
+    consteval static auto test_to_string() -> bool{
+        if constexpr (I < static_cast<size_t>(Colour::COUNT)) {
+            constexpr auto s = to_string<static_cast<Colour>(I)>();
+            return test_to_string<I+1>();
+        }
+        return true;
+    }
+    constexpr static bool to_string_test = test_to_string();
 
     // runtime version 
     [[nodiscard]] static auto to_string(Colour val) -> std::string_view {
@@ -262,6 +378,113 @@ namespace PjPlot {
                 throw std::invalid_argument("Error: unsupported colour type");
         }
     }
+
+    class RGBA {
+    public:
+        constexpr RGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) 
+        : m_r(r), m_g(g), m_b(b), m_a(a) {
+        }
+    private:
+        uint8_t m_r;
+        uint8_t m_g;
+        uint8_t m_b;
+        uint8_t m_a;
+    };
+
+    // a class to store the image elements for the grid, including lines, labels and ticks
+    // each element has a pair of x and y coordinates (representing the top-left corner), and a Mat2 of RGBA values
+    // the purpose is to quickly draw the grid on the image without having to iterate over the entire image
+    // can support either dynamic memory or static memory for each of the grid elements depending on user requirements
+    template <Size2 TitleSize, Size2 LabelSize, Size2 TickSize>
+    class GridData {
+    public:
+
+    private:
+        template <typename T>
+        struct GridElement {
+            T m_element;
+            DataType::Vec2<size_t> m_offset;
+        };
+        static constexpr size_t k_max_num_labels = 2;
+        static constexpr size_t k_max_num_ticks = 20;
+        GridElement<Mat2<RGBA, TitleSize>> m_title;
+        GridElement<ArrayNd<Mat2<RGBA, LabelSize>, StaticSize1<k_max_num_labels>>> m_labels;
+        GridElement<ArrayNd<Mat2<RGBA, TickSize>, StaticSize1<k_max_num_ticks>>> m_ticks;
+    };
+
+    // a class to store the options for the grid, including whether to show x, y, x labels and y labels
+    class GridOptions {
+    public:
+        constexpr GridOptions() = default;
+
+
+        constexpr GridOptions(size_t border_pixels, bool show_x, bool show_y, bool show_x_labels, bool show_y_labels, bool show_minor_gridlines, bool show_major_gridlines) 
+        : m_border_pixels(border_pixels), m_show_x(show_x), m_show_y(show_y), m_show_x_labels(show_x_labels), m_show_y_labels(show_y_labels), m_show_minor_gridlines(show_minor_gridlines), m_show_major_gridlines(show_major_gridlines) {
+
+        }
+
+        constexpr void set_border_pixels(size_t border_pixels) {
+            m_border_pixels = border_pixels;
+        }
+
+        constexpr void set_show_x(bool show_x) {
+            m_show_x = show_x;
+        }
+
+        constexpr void set_show_y(bool show_y) {
+            m_show_y = show_y;
+        }
+
+        constexpr void set_show_x_labels(bool show_x_labels) {
+            m_show_x_labels = show_x_labels;
+        }
+
+        constexpr void set_show_y_labels(bool show_y_labels) {
+            m_show_y_labels = show_y_labels;
+        }
+
+        constexpr void set_show_minor_gridlines(bool show_minor_gridlines) {
+            m_show_minor_gridlines = show_minor_gridlines;
+        }
+
+        constexpr void set_show_major_gridlines(bool show_major_gridlines) {
+            m_show_major_gridlines = show_major_gridlines;
+        }
+
+        [[nodiscard]] constexpr auto get_show_x() const noexcept -> bool {
+            return m_show_x;
+        }
+
+        [[nodiscard]] constexpr auto get_show_y() const noexcept -> bool {
+            return m_show_y;
+        }
+
+        [[nodiscard]] constexpr auto get_show_x_labels() const noexcept -> bool {
+            return m_show_x_labels;
+        }
+
+        [[nodiscard]] constexpr auto get_show_y_labels() const noexcept -> bool {
+            return m_show_y_labels;
+        }
+
+        [[nodiscard]] constexpr auto get_show_minor_gridlines() const noexcept -> bool {
+            return m_show_minor_gridlines;
+        }
+
+        [[nodiscard]] constexpr auto get_show_major_gridlines() const noexcept -> bool {
+            return m_show_major_gridlines;
+        }   
+
+    private:
+
+        size_t m_border_pixels = 0;
+        bool m_show_x = true;
+        bool m_show_y = true;
+        bool m_show_x_labels = true;
+        bool m_show_y_labels = true;
+        bool m_show_minor_gridlines = true;
+        bool m_show_major_gridlines = true;
+    };  
 
     class AppearanceOptions {
     public:
@@ -302,6 +525,15 @@ namespace PjPlot {
     };
 
 
+    enum class ChartType {
+        LINE, BAR, SCATTER, COUNT
+    };
+
+    template <ChartType Type>
+    concept ValidChartType = (Type < ChartType::COUNT);
+
+    template <ChartType Type>
+        requires ValidChartType<Type>
     class Chart{
     public: 
         class Params {
@@ -315,13 +547,13 @@ namespace PjPlot {
             size_t m_num_series;
         };
 
-        template <typename UnderlyingType, Size2 OutSize>
-        [[nodiscard]] constexpr static auto get_plot(std::span<const UnderlyingType> data, Params params, const AppearanceOptions&, OutSize out_size) -> Img2<OutSize> {
+        template <UnderlyingType ElementType, Size2 OutSize>
+        [[nodiscard]] constexpr static auto get_plot(std::span<const ElementType> plot_data, Params params, const AppearanceOptions&, OutSize out_size) -> Img2<OutSize> {
             return Img2<OutSize>(out_size);
         }
 
-        template <typename UnderlyingType, Size2 OutSize>
-        constexpr static auto get_plot(std::span<const UnderlyingType> data, Params params, const AppearanceOptions&, Img2<OutSize>&) -> void {
+        template <UnderlyingType ElementType, Size2 OutSize>
+        constexpr static auto get_plot(std::span<const ElementType> plot_data, Params params, const AppearanceOptions&, Img2<OutSize>&) -> void {
             return;
         }
 
@@ -329,6 +561,10 @@ namespace PjPlot {
             using type = Params;
         };
     };
+
+    using LineChart = Chart<ChartType::LINE>;
+    using ScatterChart = Chart<ChartType::SCATTER>;
+    using BarChart = Chart<ChartType::BAR>;
 
     template <class PlotType>
     class plot_params_t {
@@ -341,13 +577,13 @@ namespace PjPlot {
         constexpr Factory() {
 
         }
-        template <class PlotType, typename UnderlyingType, Size2 OutSize = DynamcSize>
-        [[nodiscard]] constexpr auto get_plot(std::span<const UnderlyingType> data, typename plot_params_t<PlotType>::type params, OutSize output_size) const -> Img2<OutSize> {
-            return PlotType::template get_plot<UnderlyingType, OutSize>(data, params, m_appearance_options, output_size);
+        template <class PlotType, UnderlyingType ElementType, Size2 OutSize = DynamicSize2>
+        [[nodiscard]] constexpr auto get_plot(std::span<const ElementType> plot_data, typename plot_params_t<PlotType>::type params, OutSize output_size) const -> Img2<OutSize> {
+            return PlotType::template get_plot<ElementType, OutSize>(plot_data, params, m_appearance_options, output_size);
         }
         
-        template <class PlotType, typename UnderlyingType, Size2 OutSize = DynamcSize>
-        constexpr auto get_plot(std::span<const UnderlyingType> data, typename plot_params_t<PlotType>::type params, Img2<OutSize>&, OutSize output_size) const -> void {
+        template <class PlotType, UnderlyingType ElementType, Size2 OutSize = DynamicSize2>
+        constexpr auto get_plot(std::span<const ElementType> plot_data, typename plot_params_t<PlotType>::type params, Img2<OutSize>&, OutSize output_size) const -> void {
             return;
         }
 
