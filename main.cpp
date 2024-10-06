@@ -31,6 +31,16 @@ int main() {
 
     PjPlot::Mat2<double, PjPlot::DynamicSize2> mat(PjPlot::DynamicSize2(600, 600));
 
+    // test iterators
+    for (auto & val : mat) {
+        val = 0.0;
+    }
+
+    double test = 0;
+    for (const auto & val : mat) {
+        test = val;
+    }
+
     static_assert(std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::StaticSize2<600, 600>>, std::array<uint8_t, 360000>>);
     static_assert(std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::DynamicSize2>, std::vector<uint8_t>>);
 
@@ -40,6 +50,13 @@ int main() {
         std::cout << "Static sized array is not working\n";
     }
 
+    // test FailureType
+    try {
+        auto test_opt = PjPlot::AppearanceOptions::create(PjPlot::Colour::COUNT, PjPlot::Colour::WHITE);
+        auto& test = test_opt.get_value();
+    } catch (const PjPlot::UnhandledFailureException& e) {
+        std::cout << "caught unhandled failure exception: " << e.what() << '\n';
+    }
 
     constexpr auto test_appearance_opt = PjPlot::AppearanceOptions::create(PjPlot::Colour::BLACK, PjPlot::Colour::WHITE);
     

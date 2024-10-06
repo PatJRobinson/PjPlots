@@ -190,11 +190,27 @@ namespace PjPlot {
     class FailureType {
     public:
         constexpr FailureType(){}
+        constexpr explicit FailureType(std::string&& message) : m_message(std::move(message)) {}
         constexpr FailureType(std::string_view message) : m_message(message) {}
 
-        [[nodiscard]] constexpr auto get_message() const noexcept -> std::string_view {
+        [[nodiscard]] constexpr auto get_message() noexcept -> const std::string& {
             return m_message;
         }
+    private:
+        std::string m_message;
+    };
+
+        // Custom exception class for ResultWithValue errors
+    class UnhandledFailureException : public std::exception {
+    public:
+        explicit UnhandledFailureException(const std::string& message)
+            : m_message(message) {}
+
+        // Override the what() function to provide the error message
+        const char* what() const noexcept override {
+            return m_message.c_str();
+        }
+
     private:
         std::string m_message;
     };
@@ -208,14 +224,24 @@ namespace PjPlot {
             return ResultWithValue<T>(FailureType(std::move(msg)));
         }
 
-        [[nodiscard]] constexpr auto get_value() const -> T {
-            try {
-                return std::get<T>(m_value);
-            } catch (std::bad_variant_access& e) {
-                throw std::runtime_error("Error: you tried to access the value but the function failed");
+        [[nodiscard]] constexpr auto get_value() -> T& {
+            if (std::holds_alternative<FailureType>(m_value)) {
+                // Extract the failure message and throw a ResultException
+                auto& failure = std::get<FailureType>(m_value);
+                throw UnhandledFailureException(failure.get_message());
             }
+            return std::get<T>(m_value);
         }
 
+        [[nodiscard]] constexpr auto get_value() const -> const T& {
+            if (std::holds_alternative<FailureType>(m_value)) {
+                // Extract the failure message and throw a ResultException
+                auto& failure = std::get<FailureType>(m_value);
+                throw UnhandledFailureException(failure.get_message());
+            }
+            return std::get<T>(m_value);
+        }
+        
     private:
         std::variant<T, FailureType> m_value;
     };
@@ -287,6 +313,27 @@ namespace PjPlot {
         // Non-const getter for array data as std::span
         [[nodiscard]] auto data() noexcept -> std::span<T> {
             return std::span<T>(m_data.data(), m_data.size());
+        }
+
+        // Iterator support
+        using iterator = T*;
+        using const_iterator = const T*;
+
+        // Begin and end functions for non-const and const access
+        [[nodiscard]] constexpr auto begin() noexcept -> iterator {
+            return m_data.data();
+        }
+
+        [[nodiscard]] constexpr auto end() noexcept -> iterator {
+            return m_data.data() + m_data.size();
+        }
+
+        [[nodiscard]] constexpr auto begin() const noexcept -> const_iterator {
+            return m_data.data();
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> const_iterator {
+            return m_data.data() + m_data.size();
         }
 
         // Element-wise access operator (non-const)
