@@ -186,64 +186,144 @@ namespace PjPlot {
         { std::declval<T>().nele() } -> std::convertible_to<size_t>;
         { unpack_and_calculate(std::array<size_t, T::dims>{}, std::make_index_sequence<T::dims>{}) } -> std::convertible_to<size_t>;
     };
+/**
+ * @brief Represents a failure message in the application.
+ *
+ * The `FailureType` class encapsulates a failure message, which can be used to provide context about errors
+ * that occur during operations. This class is typically used in conjunction with `ResultWithValue`.
+ */
+class FailureType {
+public:
+    /**
+     * @brief Default constructor for `FailureType`.
+     */
+    constexpr FailureType() {}
 
-    class FailureType {
-    public:
-        constexpr FailureType(){}
-        constexpr explicit FailureType(std::string&& message) : m_message(std::move(message)) {}
-        constexpr FailureType(std::string_view message) : m_message(message) {}
+    /**
+     * @brief Constructs a `FailureType` with a movable string message.
+     * 
+     * @param message The failure message, which will be moved into the class.
+     */
+    constexpr explicit FailureType(std::string&& message) : m_message(std::move(message)) {}
 
-        [[nodiscard]] constexpr auto get_message() noexcept -> const std::string& {
-            return m_message;
-        }
-    private:
-        std::string m_message;
-    };
+    /**
+     * @brief Constructs a `FailureType` with a string view message.
+     * 
+     * @param message The failure message as a `std::string_view`, which will be copied into the class.
+     */
+    constexpr FailureType(std::string_view message) : m_message(message) {}
 
-        // Custom exception class for ResultWithValue errors
-    class UnhandledFailureException : public std::exception {
-    public:
-        explicit UnhandledFailureException(const std::string& message)
-            : m_message(message) {}
+    /**
+     * @brief Retrieves the failure message.
+     * 
+     * @return const std::string& The stored failure message.
+     */
+    [[nodiscard]] constexpr auto get_message() noexcept -> const std::string& {
+        return m_message;
+    }
 
-        // Override the what() function to provide the error message
-        const char* what() const noexcept override {
-            return m_message.c_str();
-        }
+private:
+    std::string m_message; ///< The failure message stored in the class.
+};
 
-    private:
-        std::string m_message;
-    };
+/**
+ * @brief Exception class for handling unhandled failures in `ResultWithValue`.
+ *
+ * The `UnhandledFailureException` class provides a way to signal that a failure occurred
+ * when attempting to retrieve a value from a `ResultWithValue` instance, without the
+ * caller explicitly handling the failure case.
+ */
+class UnhandledFailureException : public std::exception {
+public:
+    /**
+     * @brief Constructs an `UnhandledFailureException` with a specified message.
+     * 
+     * @param message The message that describes the failure.
+     */
+    explicit UnhandledFailureException(const std::string& message)
+        : m_message(message) {}
 
+    /**
+     * @brief Overrides the what() function to provide the error message.
+     * 
+     * @return const char* A C-style string containing the error message.
+     */
+    const char* what() const noexcept override {
+        return m_message.c_str();
+    }
+
+private:
+    std::string m_message; ///< The failure message associated with the exception.
+};
+
+    /**
+     * @brief Represents a result that can either hold a value or indicate a failure.
+     *
+     * The `ResultWithValue` class can be used to return results from functions while
+     * handling potential failure cases. The result can either be a successful value of type T
+     * or a `FailureType` indicating the reason for failure.
+     *
+     * @tparam T The type of the value that can be returned.
+     */
     template <typename T>
     class ResultWithValue {
     public:
+        /**
+         * @brief Constructs a `ResultWithValue` with a successful value.
+         * 
+         * @param value The successful value to be stored.
+         */
         constexpr ResultWithValue(T&& value) : m_value(std::move(value)) {}
+
+        /**
+         * @brief Constructs a `ResultWithValue` with a failure indication.
+         * 
+         * @param value The `FailureType` indicating failure.
+         */
         constexpr ResultWithValue(FailureType&& value) : m_value(std::move(value)) {}
-        [[nodiscard]] constexpr static auto Failure(std::string&& msg) noexcept -> ResultWithValue<T>{
+
+        /**
+         * @brief Factory method to create a failure result.
+         * 
+         * @param msg The message associated with the failure.
+         * @return ResultWithValue<T> A `ResultWithValue` that indicates failure.
+         */
+        [[nodiscard]] constexpr static auto Failure(std::string&& msg) noexcept -> ResultWithValue<T> {
             return ResultWithValue<T>(FailureType(std::move(msg)));
         }
 
+        /**
+         * @brief Retrieves the stored value, or throws an exception if a failure occurred.
+         * 
+         * @return T& The stored value of type T.
+         * @throws UnhandledFailureException If the stored value is a failure indication.
+         */
         [[nodiscard]] constexpr auto get_value() -> T& {
             if (std::holds_alternative<FailureType>(m_value)) {
-                // Extract the failure message and throw a ResultException
+                // Extract the failure message and throw a UnhandledFailureException
                 auto& failure = std::get<FailureType>(m_value);
                 throw UnhandledFailureException(failure.get_message());
             }
             return std::get<T>(m_value);
         }
 
+        /**
+         * @brief Retrieves the stored value, or throws an exception if a failure occurred (const version).
+         * 
+         * @return const T& The stored value of type T.
+         * @throws UnhandledFailureException If the stored value is a failure indication.
+         */
         [[nodiscard]] constexpr auto get_value() const -> const T& {
             if (std::holds_alternative<FailureType>(m_value)) {
-                // Extract the failure message and throw a ResultException
+                // Extract the failure message and throw a UnhandledFailureException
                 auto& failure = std::get<FailureType>(m_value);
                 throw UnhandledFailureException(failure.get_message());
             }
             return std::get<T>(m_value);
         }
-        
+
     private:
-        std::variant<T, FailureType> m_value;
+        std::variant<T, FailureType> m_value; ///< Holds either the successful value or a failure indication.
     };
 
 
