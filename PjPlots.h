@@ -6,6 +6,7 @@
 #include <exception>
 #include <stdexcept>
 #include <stdint.h>
+#include <numeric>
 
 
 
@@ -149,6 +150,32 @@ namespace PjPlot {
         }
     };
 
+    template <size_t N>
+    constexpr inline auto slice_size_array(std::array<size_t, N> sizes) noexcept {
+        std::array<size_t, N-1> res; 
+        for (size_t i = 0; i < (N-1); ++i) 
+            res[i] = sizes[i+1]; 
+        return res;
+    }
+
+    template <size_t N, std::array<size_t, N> Sizes>
+    requires (N > 3)
+    struct StaticSizeN {
+        using is_static_size = std::true_type;
+        using is_size_type = std::true_type;
+
+        static constexpr size_t nele() {return std::accumulate(Sizes.begin(), Sizes.end(), 1, std::multiplies<size_t>());}
+        static constexpr size_t dims = N;
+
+        using SliceType = std::conditional_t<
+            (N == 4),
+            StaticSize3<Sizes[1], Sizes[2], Sizes[3]>,
+            StaticSizeN<N-1, slice_size_array(Sizes)>                      // Dynamic size: std::vector
+        >;
+        [[nodiscard]] auto slice() const noexcept {
+            return SliceType();
+        }
+    };
 
     struct DynamicSize1 {
         static constexpr bool is_dynamic = true;
@@ -204,6 +231,32 @@ namespace PjPlot {
         }
     };
     
+    template <size_t N>
+    requires (N > 3)
+    struct DynamicSizeN {
+        using is_static_size = std::true_type;
+        using is_size_type = std::true_type;
+        constexpr DynamicSizeN(std::array<size_t, N>&& sizes) : m_sizes(sizes) {}
+
+        constexpr size_t nele() {return std::accumulate(m_sizes.begin(), m_sizes.end(), 1, std::multiplies<size_t>());}
+        std::array<size_t, N> m_sizes;
+        static constexpr size_t dims = N;
+
+        using SliceType = std::conditional_t<
+            (N == 4),
+            DynamicSize3,
+            DynamicSizeN<N-1>                      // Dynamic size: std::vector
+        >;
+
+        [[nodiscard]] auto slice() const noexcept {
+            if constexpr (N == 4) {
+                return DynamicSize3(m_sizes[1], m_sizes[2], m_sizes[3]);
+            } else {
+                return DynamicSizeN(slice_size_array(m_sizes));
+            }
+            
+        }
+    };
 
     template <typename T>
     concept Size1 = requires {
