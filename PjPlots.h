@@ -170,7 +170,7 @@ namespace PjPlot {
         using SliceType = std::conditional_t<
             (N == 4),
             StaticSize3<Sizes[1], Sizes[2], Sizes[3]>,
-            StaticSizeN<N-1, slice_size_array(Sizes)>                      // Dynamic size: std::vector
+            StaticSizeN<N-1, slice_size_array(Sizes)>
         >;
         [[nodiscard]] auto slice() const noexcept {
             return SliceType();
