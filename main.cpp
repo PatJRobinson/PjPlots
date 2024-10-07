@@ -36,13 +36,29 @@ int main() {
         val = 0.0;
     }
 
+    for (size_t i = 0; i < 600; ++i) {
+        auto slice = mat[i];
+        for (size_t j = 0; j < 600; ++j) {
+            slice[j] = static_cast<double>(i*600+j);
+        }
+    }
+
+    const auto& k_mat = mat;
+
+    for (size_t i = 0; i < 1; ++i) {
+        auto slice = k_mat[i];
+        for (size_t j = 0; j < 600; ++j) {
+            // std::cout << "val: " << slice[j] << '\n';
+        }
+    }
+
     double test = 0;
     for (const auto & val : mat) {
         test = val;
     }
 
     static_assert(std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::StaticSize2<600, 600>>, std::array<uint8_t, 360000>>);
-    static_assert(std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::DynamicSize2>, std::vector<uint8_t>>);
+    static_assert(std::is_same_v<PjPlot::StorageType<PjPlot::RGBA, PjPlot::DynamicSize2>, std::vector<PjPlot::RGBA>>);
 
     if constexpr (std::is_same_v<PjPlot::StorageType<uint8_t, PjPlot::StaticSize2<600, 600>>, std::array<uint8_t, 360000>>) {
         std::cout << "Static sized array is working\n";
@@ -65,7 +81,6 @@ int main() {
     builder.get_appearance_options().set_text_colour(PjPlot::Colour::WHITE);
     const auto img = builder.get_plot<PjPlot::LineChart, double>(arr, PjPlot::LineChart::Params(k_num_series, k_series_length), PjPlot::StaticSize2<600, 600>{});
     const auto img_dynamic = builder.get_plot<PjPlot::LineChart, double>(arr, PjPlot::LineChart::Params(k_num_series, k_series_length), PjPlot::DynamicSize2(600, 600));
-    // const auto img = builder.get_plot<PjPlot::Chart, double>(arr, PjPlot::Chart::Params(k_num_series, k_series_length));
     std::cout << "I am a " << img.to_string() << ", my underlying type is: " << img.type_s() << '\n';
     const auto img2 = img;
 

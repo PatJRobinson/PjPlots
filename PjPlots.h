@@ -28,13 +28,17 @@ namespace PjPlot {
         T z;
     };
 
-    class RGBA {
-    public:
+    struct RGB {
+        uint8_t r;
+        uint8_t g;
+        uint8_t b;
+    };
+
+    struct RGBA {
         constexpr RGBA() = default;
         constexpr RGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) 
         : m_r(r), m_g(g), m_b(b), m_a(a) {
         }
-    private:
         uint8_t m_r;
         uint8_t m_g;
         uint8_t m_b;
@@ -124,7 +128,27 @@ namespace PjPlot {
         static constexpr size_t cols() {return Cols;}
         static constexpr size_t nele() {return Rows*Cols;}
         static constexpr size_t dims = 2;
+        using SliceType = StaticSize1<Cols>;
+        [[nodiscard]] auto slice() const noexcept {
+            return StaticSize1<Cols>();
+        }
     };
+
+    template <size_t Slices, size_t Rows, size_t Cols>
+    struct StaticSize3 {
+        using is_static_size = std::true_type;
+        using is_size_type = std::true_type;
+        static constexpr size_t slices() {return Slices;}
+        static constexpr size_t rows() {return Rows;}
+        static constexpr size_t cols() {return Cols;}
+        static constexpr size_t nele() {return Slices*Rows*Cols;}
+        static constexpr size_t dims = 3;
+        using SliceType = StaticSize2<Rows, Cols>;
+        [[nodiscard]] auto slice() const noexcept {
+            return StaticSize2<Rows, Cols>();
+        }
+    };
+
 
     struct DynamicSize1 {
         static constexpr bool is_dynamic = true;
@@ -137,6 +161,7 @@ namespace PjPlot {
         size_t nele() {return m_length;}
         size_t m_length = 0;
         static constexpr size_t dims = 1;
+        using SliceType = void;
     };
 
     struct DynamicSize2 {
@@ -152,6 +177,31 @@ namespace PjPlot {
         size_t m_rows = 0;
         size_t m_cols = 0;
         static constexpr size_t dims = 2;
+        using SliceType = DynamicSize1;
+        [[nodiscard]] auto slice() const noexcept {
+            return DynamicSize1(m_cols);
+        }
+    };
+
+    struct DynamicSize3 {
+        static constexpr bool is_dynamic = true;
+        using is_static_size = std::false_type;
+        using is_size_type = std::true_type;
+
+        constexpr DynamicSize3(size_t slices, size_t rows, size_t cols) : m_slices(slices), m_rows(rows), m_cols(cols) {}
+
+        constexpr size_t slices() {return m_slices;}
+        constexpr size_t rows() {return m_rows;}
+        constexpr size_t cols() {return m_cols;}
+        constexpr size_t nele() {return slices()*rows()*cols();}
+        size_t m_slices = 0;
+        size_t m_rows = 0;
+        size_t m_cols = 0;
+        static constexpr size_t dims = 3;
+        using SliceType = DynamicSize1;
+        [[nodiscard]] auto slice() const noexcept {
+            return DynamicSize2(m_rows, m_cols);
+        }
     };
     
 
@@ -188,6 +238,33 @@ namespace PjPlot {
         const auto row_idx = row * dims.cols();
         return row_idx + col;
     }
+
+
+    // Define a concept that checks if a type is a size type
+    template <typename T>
+    concept Size3 = requires {
+        typename T::is_size_type;  // Ensures the type has the is_size_type trait
+        { std::declval<T>().slices() } -> std::convertible_to<size_t>;
+        { std::declval<T>().rows() } -> std::convertible_to<size_t>;
+        { std::declval<T>().cols() } -> std::convertible_to<size_t>;
+        T::dims == 3;
+    };
+
+    [[nodiscard]] inline constexpr auto calculate_linear_idx(Size3 auto dims, size_t slice, size_t row, size_t col) -> size_t {
+        if constexpr (slice >= dims.slices()) {
+            throw std::out_of_range("Slice index out of range");
+        }
+        if constexpr (row >= dims.rows()) {
+            throw std::out_of_range("Row index out of range");
+        }
+        if constexpr (col >= dims.cols()) {
+            throw std::out_of_range("Column index out of range");
+        }
+        const auto slice_idx = slice * dims.rows() * dims.cols();
+        const auto row_idx = row * dims.cols();
+        return slice_idx + row_idx + col;
+    }
+
 
     // helper function to unpack an array of indices and call the correct overload of calculate_linear_idx
     // currently only used to generically constrain SizeN
@@ -345,24 +422,28 @@ namespace PjPlot {
     };
 
 
-    template <Size2 Size>
+    template <SizeN Size>
     constexpr auto get_static_nele() -> size_t {
         if constexpr (Size::is_static_size::value) {
-            return Size::rows()*Size::cols();
+            return Size::nele();
         } else {
             return 0;
         }
     }
 
-    // Type trait to select either std::array or std::vector based on static size
-    template <typename T, Size2 Size>
+    // Type trait to select storage type based on size (static or dynamic) and ownership (owning or non-owning)
+    template <typename T, SizeN Size, bool IsOwning = true>
     using StorageType = std::conditional_t<
-        (Size::is_static_size::value),
-        std::array<T, get_static_nele<Size>()>, // Static size
-        std::vector<T>              // Dynamic size
+        IsOwning, // If owning, select std::array or std::vector
+        std::conditional_t<
+            (Size::is_static_size::value),
+            std::array<T, get_static_nele<Size>()>, // Static size: std::array
+            std::vector<T>                          // Dynamic size: std::vector
+        >,
+        std::span<T> // If not owning, use std::span for both static and dynamic sizes
     >;
 
-    template <typename T, SizeN Size>
+    template <typename T, SizeN Size, bool IsOwning = true>
     class ArrayNd {
         using is_static_size = Size::is_static_size;
     public:
@@ -370,11 +451,21 @@ namespace PjPlot {
 
         // SFINAE constructor for when a static size type is provided
         constexpr ArrayNd(Size size) noexcept 
-        requires is_static_size::value : m_size(size), m_data() {}
+        requires (is_static_size::value && IsOwning) : m_size(size), m_data() {}
 
         // SFINAE constructor for when a dynamic size type is provided
         constexpr ArrayNd(Size size) noexcept 
-        requires (!is_static_size::value) : m_size(size), m_data(std::vector<T>(size.nele())) {}
+        requires (!is_static_size::value && IsOwning) : m_size(size), m_data(std::vector<T>(size.nele())) {}
+
+        // SFINAE constructor for when a view (non-owning) is created
+        constexpr ArrayNd(Size size, T* data) noexcept 
+        requires (!IsOwning) : m_size(size), m_data(std::span<T>(data, data +size.nele())) {}
+
+        constexpr void resize(Size new_size) 
+        requires (IsOwning && !is_static_size::value) {
+            m_size = new_size;
+            m_data.resize(new_size.nele());
+        }
 
         [[nodiscard]] constexpr auto to_string() const noexcept -> std::string_view {
 
@@ -448,9 +539,33 @@ namespace PjPlot {
             return m_data[calculate_linear_idx(m_size, args...)];
         }
 
+        [[nodiscard]] constexpr auto operator[](size_t idx) -> decltype(auto) {
+            if constexpr (Size::dims > 1) {
+                auto slice_size = m_size.slice();
+                // return a contiguous view to the slice at the next lowest dimension
+                return ArrayNd<T, typename Size::SliceType, false>(slice_size, m_data.data() + idx * slice_size.nele());
+            } else {
+                // return reference to single value at the given index
+                T& ref = m_data[idx];
+                return ref;
+            }
+        }
+
+        [[nodiscard]] constexpr auto operator[](size_t idx) const -> decltype(auto) {
+            if constexpr (Size::dims > 1) {
+                auto slice_size = m_size.slice();
+                // return a contiguous view to the slice at the next lowest dimension
+                return ArrayNd<const T, typename Size::SliceType, false>(slice_size, m_data.data() + idx * slice_size.nele());
+            } else {
+                // return reference to single value at the given index
+                const T& ref = m_data[idx];
+                return ref;
+            }
+        }
+
     protected:
         Size m_size;
-        StorageType<T, Size> m_data;
+        StorageType<T, Size, IsOwning> m_data;
     };
 
     template <typename T, Size1 Size>
@@ -462,6 +577,29 @@ namespace PjPlot {
 
         constexpr Mat2(Size size) noexcept 
         : ArrayNd<T, Size>(size) {}
+
+        // Getter for the number of columns
+        [[nodiscard]] constexpr auto cols() const noexcept -> size_t {
+            return ArrayNd<T, Size>::cols();
+        }
+
+        // Getter for the number of rows
+        [[nodiscard]] constexpr auto rows() const noexcept -> size_t {
+            return ArrayNd<T, Size>::rows();
+        }
+    };
+
+    template <typename T, Size3 Size>
+    class Mat3 : public ArrayNd<T, Size> {
+    public:
+
+        constexpr Mat3(Size size) noexcept 
+        : ArrayNd<T, Size>(size) {}
+
+        // Getter for the number of slices
+        [[nodiscard]] constexpr auto slices() const noexcept -> size_t {
+            return ArrayNd<T, Size>::slices();
+        }
 
         // Getter for the number of columns
         [[nodiscard]] constexpr auto cols() const noexcept -> size_t {
@@ -713,8 +851,8 @@ namespace PjPlot {
         }
         
         template <class PlotType, UnderlyingType ElementType, Size2 OutSize = DynamicSize2>
-        constexpr auto get_plot(std::span<const ElementType> plot_data, typename plot_params_t<PlotType>::type params, Img2<OutSize>&, OutSize output_size) const -> void {
-            return;
+        constexpr auto get_plot(std::span<const ElementType> plot_data, typename plot_params_t<PlotType>::type params, Img2<OutSize>& img_out) const -> void {
+            return PlotType::template get_plot<ElementType, OutSize>(plot_data, params, m_appearance_options, img_out);
         }
 
         [[nodiscard]] constexpr auto get_appearance_options() noexcept -> AppearanceOptions& {
