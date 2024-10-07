@@ -474,7 +474,7 @@ namespace PjPlot {
         std::variant<T, FailureType> m_value; ///< Holds either the successful value or a failure indication.
     };
 
-
+    // helper function to enable inferrence of static size at compile time, used for inferring StorageType
     template <SizeN Size>
     constexpr auto get_static_nele() -> size_t {
         if constexpr (Size::is_static_size::value) {
@@ -642,6 +642,9 @@ namespace PjPlot {
         }
     };
 
+    template <typename T, Size2 Size>
+    using Mat2View = ArrayNd<T, Size, false>;
+
     template <typename T, Size3 Size>
     class Mat3 : public ArrayNd<T, Size> {
     public:
@@ -676,6 +679,9 @@ namespace PjPlot {
         WHITE, BLACK, COUNT
     };
 
+
+    template <typename T, Size3 Size>
+    using Mat3View = ArrayNd<T, Size, false>;
 
     template <Colour Val>
         requires (Val < Colour::COUNT)
